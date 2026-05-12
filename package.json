@@ -10,7 +10,8 @@
     "resume": "tsx src/cli.ts resume",
     "login": "tsx src/cli.ts login",
     "clean": "tsx src/cli.ts clean",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "postinstall": "playwright install --with-deps chromium"
   },
   "keywords": [],
   "author": "",
