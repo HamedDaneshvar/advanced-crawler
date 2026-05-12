@@ -1,0 +1,166 @@
+import fs from "node:fs";
+import path from "node:path";
+import { chromium, type BrowserContext, type Page } from "playwright";
+import PQueue from "p-queue";
+import type winston from "winston";
+import type { CrawlConfig } from "../types.js";
+import { SessionManager } from "../auth/sessionManager.js";
+import { AssetStore } from "../capture/assetStore.js";
+import { RewriteEngine } from "../rewrite/rewriteEngine.js";
+import { CrawlDatabase } from "../storage/database.js";
+import { waitForPageStable, autoScrollUntilStable } from "./pageStability.js";
+import { isUrlAllowed } from "./scope.js";
+import { isSameOrigin, normalizeUrl, toOfflineHtmlPath } from "../utils/url.js";
+
+export class MirrorCrawler {
+  private readonly db: CrawlDatabase;
+  private readonly session = new SessionManager();
+  private readonly queue: PQueue;
+
+  constructor(private readonly config: CrawlConfig, private readonly logger: winston.Logger) {
+    this.db = new CrawlDatabase(config.dbPath);
+    this.queue = new PQueue({ concurrency: config.concurrency });
+  }
+
+  async loginOnly(): Promise<void> {
+    const context = await this.newContext();
+    const page = await context.newPage();
+    await page.goto(this.config.loginUrl ?? this.config.baseUrl, { waitUntil: "domcontentloaded" });
+    this.logger.info("Complete login and press Enter.");
+    await waitForEnter();
+    await this.session.save(context, page);
+    await context.close();
+  }
+
+  async crawl(mode: "crawl" | "resume"): Promise<void> {
+    this.db.resetInProgressToPending();
+    if (mode === "crawl") {
+      this.db.enqueue({ url: normalizeUrl(this.config.baseUrl, this.config.baseUrl), depth: 0 });
+    }
+
+    const context = await this.newContext();
+    const page = await context.newPage();
+    const assets = new AssetStore(this.config.assetsDir, this.db, this.config.maxAssetSizeBytes);
+    const rewrite = new RewriteEngine(this.db);
+
+    page.on("response", async (response) => {
+      try {
+        await assets.saveFromResponse(response);
+      } catch {
+        // Skip malformed or inaccessible response bodies.
+      }
+    });
+
+    while (this.db.pendingCount() > 0) {
+      const item = this.db.nextPending();
+      if (!item) break;
+      await this.queue.add(async () => this.processOne(page, item.url, item.depth, rewrite));
+      await randomDelay(this.config.delayMinMs, this.config.delayMaxMs);
+    }
+
+    await this.queue.onIdle();
+    await context.close();
+  }
+
+  private async processOne(page: Page, url: string, depth: number, rewrite: RewriteEngine): Promise<void> {
+    if (depth > this.config.maxDepth) return;
+
+    const retries = this.db.getRetries(url);
+    try {
+      const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: this.config.navigationTimeoutMs });
+      if (!response) throw new Error("No navigation response");
+
+      const current = normalizeUrl(page.url(), this.config.baseUrl);
+      if (!isSameOrigin(current, this.config.baseUrl)) {
+        this.db.markDone(url, "external-skipped");
+        return;
+      }
+
+      if (this.config.loginUrl && current.startsWith(this.config.loginUrl)) {
+        throw new Error("Authentication expired; run login and resume.");
+      }
+
+      await waitForPageStable(page, this.config.pageStable);
+      await autoScrollUntilStable(page, this.config.maxScrollIterations);
+
+      const html = await page.content();
+      const htmlPath = toOfflineHtmlPath(current, this.config.outputDir);
+      const rewritten = rewrite.rewriteHtml(html, current, htmlPath);
+      rewrite.saveRewrittenHtml(htmlPath, rewritten);
+
+      if (this.config.saveScreenshots) {
+        const shotPath = path.resolve("screenshots", `${Buffer.from(current).toString("base64url")}.png`);
+        fs.mkdirSync(path.dirname(shotPath), { recursive: true });
+        await page.screenshot({ path: shotPath, fullPage: true });
+      }
+
+      const links = await page.$$eval("a[href]", (anchors) => anchors.map((a) => (a as HTMLAnchorElement).href));
+      for (const href of links) {
+        const next = normalizeUrl(href, current);
+        if (!isSameOrigin(next, this.config.baseUrl)) continue;
+        if (!isUrlAllowed(next, this.config)) continue;
+        if (this.db.isVisited(next)) continue;
+        this.db.enqueue({ url: next, depth: depth + 1, discoveredFrom: current });
+      }
+
+      this.db.markDone(url, htmlPath);
+      this.logger.info("saved page", { url: current, htmlPath });
+    } catch (error) {
+      if (retries < this.config.maxRetries) {
+        this.db.retry(url, retries + 1);
+      } else {
+        this.db.markFailed(url, String(error), retries);
+      }
+      this.logger.error("page failed", { url, retries, error: String(error) });
+    }
+  }
+
+  private async newContext(): Promise<BrowserContext> {
+    const browser = await chromium.launch({
+      headless: !this.config.headful,
+      args: ["--disable-blink-features=AutomationControlled"]
+    });
+
+    const context = await browser.newContext({
+      storageState: this.session.hasState() ? this.session.statePath() : undefined,
+      serviceWorkers: this.config.blockServiceWorkers ? "block" : "allow",
+      userAgent: randomUserAgent(),
+      viewport: randomViewport()
+    });
+
+    this.session.injectStorageInitScript(context);
+    context.setDefaultNavigationTimeout(this.config.navigationTimeoutMs);
+    context.setDefaultTimeout(this.config.requestTimeoutMs);
+    return context;
+  }
+}
+
+function randomDelay(min: number, max: number): Promise<void> {
+  const ms = Math.floor(Math.random() * (max - min + 1)) + min;
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function randomUserAgent(): string {
+  const list = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  ];
+  return list[Math.floor(Math.random() * list.length)] ?? list[0];
+}
+
+function randomViewport(): { width: number; height: number } {
+  const widths = [1366, 1440, 1536, 1600];
+  const heights = [768, 900, 960, 1024];
+  return {
+    width: widths[Math.floor(Math.random() * widths.length)] ?? 1366,
+    height: heights[Math.floor(Math.random() * heights.length)] ?? 768
+  };
+}
+
+function waitForEnter(): Promise<void> {
+  return new Promise((resolve) => {
+    process.stdin.resume();
+    process.stdin.setEncoding("utf8");
+    process.stdin.once("data", () => resolve());
+  });
+}

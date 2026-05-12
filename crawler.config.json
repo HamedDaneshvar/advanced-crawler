@@ -1,0 +1,26 @@
+{
+  "baseUrl": "https://example.com",
+  "loginUrl": "https://example.com/login",
+  "maxDepth": 3,
+  "concurrency": 1,
+  "delayMinMs": 2000,
+  "delayMaxMs": 5000,
+  "maxRetries": 3,
+  "allowedDomains": [],
+  "blockedDomains": [],
+  "includePatterns": [],
+  "excludePatterns": ["/logout", "/delete", "/payment"],
+  "blockedRoutes": ["/logout", "/delete", "/payment"],
+  "logoutRoutePatterns": ["logout", "signout"],
+  "requestTimeoutMs": 45000,
+  "navigationTimeoutMs": 60000,
+  "pageStable": {
+    "networkIdleMs": 1500,
+    "domQuietMs": 1000,
+    "timeoutMs": 30000
+  },
+  "maxScrollIterations": 15,
+  "maxAssetSizeBytes": 20971520,
+  "saveScreenshots": true,
+  "debug": false
+}

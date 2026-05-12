@@ -1,0 +1,41 @@
+import { readFileSync, existsSync } from "node:fs";
+import path from "node:path";
+import dotenv from "dotenv";
+import { crawlConfigSchema } from "./schema.js";
+import type { CrawlConfig } from "../types.js";
+
+dotenv.config();
+
+export function loadConfig(configPath = "crawler.config.json"): CrawlConfig {
+  const abs = path.resolve(configPath);
+  const file = existsSync(abs) ? JSON.parse(readFileSync(abs, "utf-8")) : {};
+
+  const merged = {
+    ...file,
+    baseUrl: process.env.BASE_URL ?? file.baseUrl,
+    loginUrl: process.env.LOGIN_URL ?? file.loginUrl,
+    maxDepth: toNum(process.env.MAX_DEPTH, file.maxDepth),
+    concurrency: toNum(process.env.CONCURRENCY, file.concurrency),
+    delayMinMs: toNum(process.env.DELAY_MIN_MS, file.delayMinMs),
+    delayMaxMs: toNum(process.env.DELAY_MAX_MS, file.delayMaxMs),
+    maxRetries: toNum(process.env.MAX_RETRIES, file.maxRetries),
+    outputDir: process.env.OUTPUT_DIR ?? file.outputDir,
+    assetsDir: process.env.ASSETS_DIR ?? file.assetsDir,
+    dbPath: process.env.DB_PATH ?? file.dbPath,
+    headful: toBool(process.env.HEADFUL, file.headful),
+    blockServiceWorkers: toBool(process.env.BLOCK_SERVICE_WORKERS, file.blockServiceWorkers)
+  };
+
+  return crawlConfigSchema.parse(merged);
+}
+
+function toNum(raw: string | undefined, fallback: number | undefined): number | undefined {
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function toBool(raw: string | undefined, fallback: boolean | undefined): boolean | undefined {
+  if (raw === undefined) return fallback;
+  return raw.toLowerCase() === "true";
+}

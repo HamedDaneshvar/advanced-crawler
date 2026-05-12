@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+output/
+assets/
+logs/
+cache/
+db/
+screenshots/
+auth/state.json
+auth/localStorage.json
+auth/sessionStorage.json
