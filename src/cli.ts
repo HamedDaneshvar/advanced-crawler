@@ -3,27 +3,33 @@ import path from "node:path";
 import { loadConfig } from "./config/loadConfig.js";
 import { MirrorCrawler } from "./core/crawler.js";
 import { createLogger } from "./utils/logger.js";
+import { shutdownLogger } from "./utils/shutdownLogger.js";
 
 async function main(): Promise<void> {
-  const command = process.argv[2] ?? "crawl";
   const config = loadConfig();
   const logger = createLogger(config.debug);
-  const crawler = new MirrorCrawler(config, logger);
+  let crawler: MirrorCrawler | undefined;
+  try {
+    crawler = new MirrorCrawler(config, logger);
 
-  switch (command) {
-    case "login":
-      await crawler.loginOnly();
-      return;
-    case "resume":
-      await crawler.crawl("resume");
-      return;
-    case "clean":
-      cleanRuntime();
-      logger.info("clean completed");
-      return;
-    case "crawl":
-    default:
-      await crawler.crawl("crawl");
+    switch (process.argv[2] ?? "crawl") {
+      case "login":
+        await crawler.loginOnly();
+        return;
+      case "resume":
+        await crawler.crawl("resume");
+        return;
+      case "clean":
+        cleanRuntime();
+        logger.info("clean completed");
+        return;
+      case "crawl":
+      default:
+        await crawler.crawl("crawl");
+    }
+  } finally {
+    crawler?.dispose();
+    await shutdownLogger(logger).catch(() => {});
   }
 }
 

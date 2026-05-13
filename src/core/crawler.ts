@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { chromium, type BrowserContext, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import PQueue from "p-queue";
 import type winston from "winston";
 import type { CrawlConfig } from "../types.js";
@@ -11,11 +11,14 @@ import { CrawlDatabase } from "../storage/database.js";
 import { waitForPageStable, autoScrollUntilStable } from "./pageStability.js";
 import { isUrlAllowed } from "./scope.js";
 import { isSameOrigin, normalizeUrl, toOfflineHtmlPath } from "../utils/url.js";
+import { waitForLine } from "../utils/waitForLine.js";
 
 export class MirrorCrawler {
   private readonly db: CrawlDatabase;
   private readonly session = new SessionManager();
   private readonly queue: PQueue;
+  /** Set only when using `chromium.launch` + `newContext` (must close after `context.close()`). */
+  private ephemeralBrowser: Browser | undefined;
 
   constructor(private readonly config: CrawlConfig, private readonly logger: winston.Logger) {
     this.db = new CrawlDatabase(config.dbPath);
@@ -23,13 +26,24 @@ export class MirrorCrawler {
   }
 
   async loginOnly(): Promise<void> {
-    const context = await this.newContext();
-    const page = await context.newPage();
-    await page.goto(this.config.loginUrl ?? this.config.baseUrl, { waitUntil: "domcontentloaded" });
-    this.logger.info("Complete login and press Enter.");
-    await waitForEnter();
-    await this.session.save(context, page);
-    await context.close();
+    let context: BrowserContext | undefined;
+    try {
+      context = await this.newContext();
+      const page = await context.newPage();
+      await page.goto(this.config.loginUrl ?? this.config.baseUrl, { waitUntil: "domcontentloaded" });
+      this.logger.info("Complete login and press Enter.");
+      await waitForLine();
+      await this.session.save(context, page);
+    } finally {
+      if (context) {
+        await context.close().catch(() => {});
+        await this.closeEphemeralBrowserIfAny();
+      }
+    }
+  }
+
+  dispose(): void {
+    this.db.close();
   }
 
   async crawl(mode: "crawl" | "resume"): Promise<void> {
@@ -38,28 +52,35 @@ export class MirrorCrawler {
       this.db.enqueue({ url: normalizeUrl(this.config.baseUrl, this.config.baseUrl), depth: 0 });
     }
 
-    const context = await this.newContext();
-    const page = await context.newPage();
-    const assets = new AssetStore(this.config.assetsDir, this.db, this.config.maxAssetSizeBytes);
-    const rewrite = new RewriteEngine(this.db);
+    let context: BrowserContext | undefined;
+    try {
+      context = await this.newContext();
+      const page = await context.newPage();
+      const assets = new AssetStore(this.config.assetsDir, this.db, this.config.maxAssetSizeBytes);
+      const rewrite = new RewriteEngine(this.db);
 
-    page.on("response", async (response) => {
-      try {
-        await assets.saveFromResponse(response);
-      } catch {
-        // Skip malformed or inaccessible response bodies.
+      page.on("response", async (response) => {
+        try {
+          await assets.saveFromResponse(response);
+        } catch {
+          // Skip malformed or inaccessible response bodies.
+        }
+      });
+
+      while (this.db.pendingCount() > 0) {
+        const item = this.db.nextPending();
+        if (!item) break;
+        await this.queue.add(async () => this.processOne(page, item.url, item.depth, rewrite));
+        await randomDelay(this.config.delayMinMs, this.config.delayMaxMs);
       }
-    });
 
-    while (this.db.pendingCount() > 0) {
-      const item = this.db.nextPending();
-      if (!item) break;
-      await this.queue.add(async () => this.processOne(page, item.url, item.depth, rewrite));
-      await randomDelay(this.config.delayMinMs, this.config.delayMaxMs);
+      await this.queue.onIdle();
+    } finally {
+      if (context) {
+        await context.close().catch(() => {});
+        await this.closeEphemeralBrowserIfAny();
+      }
     }
-
-    await this.queue.onIdle();
-    await context.close();
   }
 
   private async processOne(page: Page, url: string, depth: number, rewrite: RewriteEngine): Promise<void> {
@@ -140,6 +161,7 @@ export class MirrorCrawler {
     }
 
     const browser = await chromium.launch(shared);
+    this.ephemeralBrowser = browser;
     const context = await browser.newContext({
       storageState: this.session.hasState() ? this.session.statePath() : undefined,
       serviceWorkers: this.config.blockServiceWorkers ? "block" : "allow",
@@ -151,6 +173,15 @@ export class MirrorCrawler {
     context.setDefaultNavigationTimeout(this.config.navigationTimeoutMs);
     context.setDefaultTimeout(this.config.requestTimeoutMs);
     return context;
+  }
+
+  private async closeEphemeralBrowserIfAny(): Promise<void> {
+    if (!this.ephemeralBrowser) return;
+    try {
+      await this.ephemeralBrowser.close();
+    } finally {
+      this.ephemeralBrowser = undefined;
+    }
   }
 
   /** Options shared by `chromium.launch` and `chromium.launchPersistentContext`. */
@@ -206,12 +237,4 @@ function randomViewport(): { width: number; height: number } {
     width: widths[Math.floor(Math.random() * widths.length)] ?? 1366,
     height: heights[Math.floor(Math.random() * heights.length)] ?? 768
   };
-}
-
-function waitForEnter(): Promise<void> {
-  return new Promise((resolve) => {
-    process.stdin.resume();
-    process.stdin.setEncoding("utf8");
-    process.stdin.once("data", () => resolve());
-  });
 }

@@ -75,4 +75,12 @@ export class CrawlDatabase {
     return (this.db.prepare("SELECT local_path as localPath FROM assets WHERE original_url=?").get(originalUrl) as { localPath: string } | undefined)?.localPath;
   }
   pendingCount(): number { return (this.db.prepare("SELECT COUNT(*) as c FROM queue WHERE status='pending'").get() as { c: number }).c; }
+
+  close(): void {
+    try {
+      this.db.close();
+    } catch {
+      // Already closed.
+    }
+  }
 }
