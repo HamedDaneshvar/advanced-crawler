@@ -47,7 +47,11 @@ export class CrawlDatabase {
   }
 
   enqueue(item: QueueItem): void {
-    this.db.prepare(`INSERT INTO queue (url, depth, discovered_from) VALUES (@url, @depth, @discoveredFrom) ON CONFLICT(url) DO NOTHING`).run(item);
+    this.db.prepare(`INSERT INTO queue (url, depth, discovered_from) VALUES (@url, @depth, @discoveredFrom) ON CONFLICT(url) DO NOTHING`).run({
+      url: item.url,
+      depth: item.depth,
+      discoveredFrom: item.discoveredFrom ?? null
+    });
   }
   nextPending(): QueueItem | null {
     const row = this.db.prepare("SELECT url, depth, discovered_from as discoveredFrom FROM queue WHERE status='pending' ORDER BY depth ASC, rowid ASC LIMIT 1").get() as QueueItem | undefined;
