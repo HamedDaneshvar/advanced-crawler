@@ -116,18 +116,30 @@ export class MirrorCrawler {
   }
 
   private async newContext(): Promise<BrowserContext> {
-    const launchOptions: Parameters<typeof chromium.launch>[0] = {
-      headless: !this.config.headful,
-      args: ["--disable-blink-features=AutomationControlled"]
-    };
-    if (this.config.browserChannel !== "chromium") {
-      launchOptions.channel = this.config.browserChannel;
-    }
-    if (this.config.browserExecutablePath) {
-      launchOptions.executablePath = this.config.browserExecutablePath;
-    }
-    const browser = await chromium.launch(launchOptions);
+    const usePersistent = Boolean(this.config.browserUserDataDir);
+    const useChromeFamily = this.config.browserChannel !== "chromium";
+    const shared = this.sharedLaunchOptions();
 
+    if (usePersistent) {
+      const userDataDir = path.resolve(this.config.browserUserDataDir!);
+      fs.mkdirSync(userDataDir, { recursive: true });
+      this.logger.info("Using persistent browser profile", { userDataDir });
+
+      const context = await chromium.launchPersistentContext(userDataDir, {
+        ...shared,
+        serviceWorkers: this.config.blockServiceWorkers ? "block" : "allow",
+        viewport: useChromeFamily ? null : randomViewport(),
+        ...(useChromeFamily ? {} : { userAgent: randomUserAgent() })
+      });
+
+      await this.session.applySavedCookies(context);
+      this.session.injectStorageInitScript(context);
+      context.setDefaultNavigationTimeout(this.config.navigationTimeoutMs);
+      context.setDefaultTimeout(this.config.requestTimeoutMs);
+      return context;
+    }
+
+    const browser = await chromium.launch(shared);
     const context = await browser.newContext({
       storageState: this.session.hasState() ? this.session.statePath() : undefined,
       serviceWorkers: this.config.blockServiceWorkers ? "block" : "allow",
@@ -139,6 +151,38 @@ export class MirrorCrawler {
     context.setDefaultNavigationTimeout(this.config.navigationTimeoutMs);
     context.setDefaultTimeout(this.config.requestTimeoutMs);
     return context;
+  }
+
+  /** Options shared by `chromium.launch` and `chromium.launchPersistentContext`. */
+  private sharedLaunchOptions(): Parameters<typeof chromium.launch>[0] {
+    const useChromeFamily = this.config.browserChannel !== "chromium";
+    const extraArgs: string[] = [];
+    if (!this.config.omitAutomationControlledLaunchArg) {
+      extraArgs.push("--disable-blink-features=AutomationControlled");
+    }
+
+    const opts: Parameters<typeof chromium.launch>[0] = {
+      headless: !this.config.headful,
+      args: extraArgs,
+      ...(this.config.chromiumSandbox ? { chromiumSandbox: true } : {})
+    };
+    if (this.config.browserChannel !== "chromium") {
+      opts.channel = this.config.browserChannel;
+    }
+    if (this.config.browserExecutablePath) {
+      opts.executablePath = this.config.browserExecutablePath;
+    }
+    const ignoreDefaults: string[] = [];
+    if (this.config.ignoreDefaultAutomationArgs && useChromeFamily) {
+      ignoreDefaults.push("--enable-automation");
+    }
+    if (this.config.allowBrowserExtensions) {
+      ignoreDefaults.push("--disable-extensions");
+    }
+    if (ignoreDefaults.length > 0) {
+      opts.ignoreDefaultArgs = ignoreDefaults;
+    }
+    return opts;
   }
 }
 

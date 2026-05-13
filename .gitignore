@@ -10,3 +10,4 @@ screenshots/
 auth/state.json
 auth/localStorage.json
 auth/sessionStorage.json
+.chrome-profile/

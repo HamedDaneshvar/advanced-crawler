@@ -25,7 +25,15 @@ export function loadConfig(configPath = "crawler.config.json"): CrawlConfig {
     headful: toBool(process.env.HEADFUL, file.headful),
     blockServiceWorkers: toBool(process.env.BLOCK_SERVICE_WORKERS, file.blockServiceWorkers),
     browserChannel: trimOrUndef(process.env.PLAYWRIGHT_CHANNEL) ?? file.browserChannel,
-    browserExecutablePath: trimOrUndef(process.env.BROWSER_EXECUTABLE_PATH) ?? file.browserExecutablePath
+    browserExecutablePath: trimOrUndef(process.env.BROWSER_EXECUTABLE_PATH) ?? file.browserExecutablePath,
+    browserUserDataDir: trimOrUndef(process.env.PLAYWRIGHT_USER_DATA_DIR) ?? file.browserUserDataDir,
+    ignoreDefaultAutomationArgs: toBool(process.env.PLAYWRIGHT_IGNORE_ENABLE_AUTOMATION, file.ignoreDefaultAutomationArgs),
+    chromiumSandbox: toBool(process.env.PLAYWRIGHT_CHROMIUM_SANDBOX, file.chromiumSandbox),
+    allowBrowserExtensions: toBool(process.env.PLAYWRIGHT_ALLOW_EXTENSIONS, file.allowBrowserExtensions),
+    omitAutomationControlledLaunchArg: toBool(
+      process.env.PLAYWRIGHT_OMIT_AUTOMATION_CONTROLLED_ARG,
+      file.omitAutomationControlledLaunchArg
+    )
   };
 
   return crawlConfigSchema.parse(merged);

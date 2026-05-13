@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { BrowserContext, Page } from "playwright";
+import type { BrowserContext, Cookie, Page } from "playwright";
 
 const AUTH_DIR = path.resolve("auth");
 const STATE_PATH = path.join(AUTH_DIR, "state.json");
@@ -42,6 +42,16 @@ export class SessionManager {
       for (const [k, v] of Object.entries(localData)) window.localStorage.setItem(k, v);
       for (const [k, v] of Object.entries(sessionData)) window.sessionStorage.setItem(k, v);
     }, { localData: local, sessionData: session });
+  }
+
+  /**
+   * `launchPersistentContext` does not accept `storageState` in this Playwright version; restore cookies from `state.json`.
+   */
+  async applySavedCookies(context: BrowserContext): Promise<void> {
+    if (!this.hasState()) return;
+    const data = JSON.parse(fs.readFileSync(STATE_PATH, "utf-8")) as { cookies?: Cookie[] };
+    if (!data.cookies?.length) return;
+    await context.addCookies(data.cookies);
   }
 
   private readStorageFile(filePath: string): Record<string, string> {

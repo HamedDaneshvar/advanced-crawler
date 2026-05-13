@@ -34,8 +34,33 @@ Enterprise-grade authenticated browser mirroring with Node.js + TypeScript + Pla
 All commands (`login`, `crawl`, `resume`) use the same launch settings.
 
 - **Bundled Chromium** (default): set `browserChannel` to `chromium` in `crawler.config.json`, or unset `PLAYWRIGHT_CHANNEL` in `.env`.
-- **Installed Google Chrome** (Chrome Web Store extensions): set `PLAYWRIGHT_CHANNEL=chrome` in `.env` or `"browserChannel": "chrome"` in `crawler.config.json`. Chrome must be installed; you do **not** need `npx playwright install` for that channel.
+- **Installed Google Chrome**: set `PLAYWRIGHT_CHANNEL=chrome` in `.env` or `"browserChannel": "chrome"` in `crawler.config.json`. Chrome must be installed; you do **not** need `npx playwright install` for that channel.
 - **Custom binary**: set `BROWSER_EXECUTABLE_PATH` to your `chrome.exe` full path.
+
+### Why “Installation is not enabled” on the Chrome Web Store
+
+Playwright’s **built‑in Chromium/Chrome launch flags include `--disable-extensions`**. With extensions disabled at the browser level, the Web Store cannot install anything and you see **“Installation is not enabled”** / download errors. **Developer mode** does not override that.
+
+**Required for Web Store installs**
+
+- `PLAYWRIGHT_ALLOW_EXTENSIONS=true` (or `"allowBrowserExtensions": true` in `crawler.config.json`) — strips the default `--disable-extensions` flag via `ignoreDefaultArgs`.
+
+Also use a **persistent profile** and real Chrome (same as before):
+
+- `PLAYWRIGHT_USER_DATA_DIR=.chrome-profile` — dedicated folder (do **not** point this at your normal Chrome “User Data” while Chrome is running; Playwright can corrupt it).
+- `PLAYWRIGHT_CHANNEL=chrome`
+- `PLAYWRIGHT_IGNORE_ENABLE_AUTOMATION=true` — omits Playwright’s `--enable-automation` default argument.
+- `PLAYWRIGHT_CHROMIUM_SANDBOX=true` — enables the real Chromium sandbox so Playwright **does not** add `--no-sandbox` (removes Chrome’s yellow “unsupported command-line flag: --no-sandbox” banner). Use `false` only if the sandbox cannot start (some Docker/CI images).
+
+### “Unsupported command-line flag: … AutomationControlled”
+
+This project used to always pass `--disable-blink-features=AutomationControlled` (note spelling: **features**, not “featues”). Chrome warns about that flag. Set `PLAYWRIGHT_OMIT_AUTOMATION_CONTROLLED_ARG=true` to stop passing it (normal for extension/Web Store setup; crawls may prefer leaving it off only when you need fewer warnings).
+
+After the first successful install from the Web Store into that profile, extensions stay in `.chrome-profile` for future `npm run login` / `crawl` / `resume` runs.
+
+If it still fails, check **Windows / Chrome enterprise policies** (admin can disable the store or all extensions).
+
+For **automated crawling only** (no Web Store / no extensions), set `PLAYWRIGHT_ALLOW_EXTENSIONS=false` so Playwright keeps `--disable-extensions` (slightly more isolated browser).
 
 ## Start
 

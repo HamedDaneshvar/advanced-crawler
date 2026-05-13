@@ -41,6 +41,11 @@ export const crawlConfigSchema = z.object({
   blockServiceWorkers: z.boolean().default(true),
   browserChannel: browserChannelSchema.default("chromium"),
   browserExecutablePath: z.string().min(1).optional(),
+  browserUserDataDir: z.string().min(1).optional(),
+  ignoreDefaultAutomationArgs: z.boolean().default(false),
+  chromiumSandbox: z.boolean().default(false),
+  allowBrowserExtensions: z.boolean().default(false),
+  omitAutomationControlledLaunchArg: z.boolean().default(false),
   outputDir: z.string().default("output"),
   assetsDir: z.string().default("assets"),
   dbPath: z.string().default("db/crawler.db")
