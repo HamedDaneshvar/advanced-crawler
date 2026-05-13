@@ -4,6 +4,18 @@ export interface PageStableOptions {
   timeoutMs: number;
 }
 
+/** Playwright `launch({ channel })` — use `chrome` for installed Google Chrome (Web Store extensions). */
+export type PlaywrightBrowserChannel =
+  | "chromium"
+  | "chrome"
+  | "chrome-beta"
+  | "chrome-dev"
+  | "chrome-canary"
+  | "msedge"
+  | "msedge-beta"
+  | "msedge-dev"
+  | "msedge-canary";
+
 export interface CrawlConfig {
   baseUrl: string;
   loginUrl?: string;
@@ -27,6 +39,10 @@ export interface CrawlConfig {
   debug: boolean;
   headful: boolean;
   blockServiceWorkers: boolean;
+  /** `chromium` = Playwright’s bundled browser; `chrome` / `msedge` = system install. */
+  browserChannel: PlaywrightBrowserChannel;
+  /** Optional: full path to browser binary (overrides default resolution for that channel). */
+  browserExecutablePath?: string;
   outputDir: string;
   assetsDir: string;
   dbPath: string;

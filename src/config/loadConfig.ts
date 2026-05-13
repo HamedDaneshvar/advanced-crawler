@@ -23,7 +23,9 @@ export function loadConfig(configPath = "crawler.config.json"): CrawlConfig {
     assetsDir: process.env.ASSETS_DIR ?? file.assetsDir,
     dbPath: process.env.DB_PATH ?? file.dbPath,
     headful: toBool(process.env.HEADFUL, file.headful),
-    blockServiceWorkers: toBool(process.env.BLOCK_SERVICE_WORKERS, file.blockServiceWorkers)
+    blockServiceWorkers: toBool(process.env.BLOCK_SERVICE_WORKERS, file.blockServiceWorkers),
+    browserChannel: trimOrUndef(process.env.PLAYWRIGHT_CHANNEL) ?? file.browserChannel,
+    browserExecutablePath: trimOrUndef(process.env.BROWSER_EXECUTABLE_PATH) ?? file.browserExecutablePath
   };
 
   return crawlConfigSchema.parse(merged);
@@ -38,4 +40,9 @@ function toNum(raw: string | undefined, fallback: number | undefined): number | 
 function toBool(raw: string | undefined, fallback: boolean | undefined): boolean | undefined {
   if (raw === undefined) return fallback;
   return raw.toLowerCase() === "true";
+}
+
+function trimOrUndef(raw: string | undefined): string | undefined {
+  const t = raw?.trim();
+  return t === "" ? undefined : t;
 }

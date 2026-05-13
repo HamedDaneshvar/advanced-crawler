@@ -22,5 +22,6 @@
   "maxScrollIterations": 15,
   "maxAssetSizeBytes": 20971520,
   "saveScreenshots": true,
-  "debug": false
+  "debug": false,
+  "browserChannel": "chromium"
 }

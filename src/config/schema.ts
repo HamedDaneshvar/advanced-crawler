@@ -1,5 +1,17 @@
 import { z } from "zod";
 
+const browserChannelSchema = z.enum([
+  "chromium",
+  "chrome",
+  "chrome-beta",
+  "chrome-dev",
+  "chrome-canary",
+  "msedge",
+  "msedge-beta",
+  "msedge-dev",
+  "msedge-canary"
+]);
+
 export const crawlConfigSchema = z.object({
   baseUrl: z.string().url(),
   loginUrl: z.string().url().optional(),
@@ -27,6 +39,8 @@ export const crawlConfigSchema = z.object({
   debug: z.boolean().default(false),
   headful: z.boolean().default(true),
   blockServiceWorkers: z.boolean().default(true),
+  browserChannel: browserChannelSchema.default("chromium"),
+  browserExecutablePath: z.string().min(1).optional(),
   outputDir: z.string().default("output"),
   assetsDir: z.string().default("assets"),
   dbPath: z.string().default("db/crawler.db")

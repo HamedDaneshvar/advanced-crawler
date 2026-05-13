@@ -116,10 +116,17 @@ export class MirrorCrawler {
   }
 
   private async newContext(): Promise<BrowserContext> {
-    const browser = await chromium.launch({
+    const launchOptions: Parameters<typeof chromium.launch>[0] = {
       headless: !this.config.headful,
       args: ["--disable-blink-features=AutomationControlled"]
-    });
+    };
+    if (this.config.browserChannel !== "chromium") {
+      launchOptions.channel = this.config.browserChannel;
+    }
+    if (this.config.browserExecutablePath) {
+      launchOptions.executablePath = this.config.browserExecutablePath;
+    }
+    const browser = await chromium.launch(launchOptions);
 
     const context = await browser.newContext({
       storageState: this.session.hasState() ? this.session.statePath() : undefined,
