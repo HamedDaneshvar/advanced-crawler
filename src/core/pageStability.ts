@@ -6,7 +6,12 @@ export async function waitForPageStable(page: Page, opts: PageStableOptions): Pr
   const start = Date.now();
   let lastMutation = Date.now();
 
-  await page.exposeFunction("__crawlerMutationPing", () => { lastMutation = Date.now(); });
+  // Try to expose function, but ignore if already registered (page reuse)
+  try {
+    await page.exposeFunction("__crawlerMutationPing", () => { lastMutation = Date.now(); });
+  } catch (e) {
+    // Function already exposed on this page, which is fine for reused pages
+  }
   await page.evaluate(() => {
     const observer = new MutationObserver(() => {
       // @ts-expect-error runtime injected function

@@ -3,7 +3,6 @@ import path from "node:path";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const archiver = require("archiver");
 
 /**
  * Creates a zip file from a directory
@@ -20,9 +19,18 @@ export async function zipDirectory(sourceDir: string, outputPath: string): Promi
     }
 
     const output = fs.createWriteStream(outputPath);
-    const archive = archiver("zip", {
-      zlib: { level: 9 } // Maximum compression
-    });
+    
+    let archive: any;
+    try {
+      // Use require to import archiver (CommonJS)
+      const Archiver = require("archiver");
+      archive = Archiver("zip", {
+        zlib: { level: 9 } // Maximum compression
+      });
+    } catch (err) {
+      reject(new Error(`Failed to initialize archiver: ${String(err)}`));
+      return;
+    }
 
     output.on("close", () => {
       resolve(path.resolve(outputPath));
@@ -64,9 +72,18 @@ export async function zipMultipleDirectories(
     }
 
     const output = fs.createWriteStream(outputPath);
-    const archive = archiver("zip", {
-      zlib: { level: 9 } // Maximum compression
-    });
+    
+    let archive: any;
+    try {
+      // Use require to import archiver (CommonJS)
+      const Archiver = require("archiver");
+      archive = Archiver("zip", {
+        zlib: { level: 9 } // Maximum compression
+      });
+    } catch (err) {
+      reject(new Error(`Failed to initialize archiver: ${String(err)}`));
+      return;
+    }
 
     output.on("close", () => {
       resolve(path.resolve(outputPath));

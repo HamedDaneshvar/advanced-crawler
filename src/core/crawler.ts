@@ -117,7 +117,7 @@ export class MirrorCrawler {
       }
 
       // Extract all links, including those without href attributes (client-side routing)
-      const links = await extractAllLinks(page);
+      const links = await extractAllLinks(page, current);
       for (const href of links) {
         const next = normalizeUrl(href, current);
         if (!isSameOrigin(next, this.config.baseUrl)) continue;
