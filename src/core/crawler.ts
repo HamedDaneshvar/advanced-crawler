@@ -12,6 +12,7 @@ import { waitForPageStable, autoScrollUntilStable } from "./pageStability.js";
 import { isUrlAllowed } from "./scope.js";
 import { isSameOrigin, normalizeUrl, toOfflineHtmlPath } from "../utils/url.js";
 import { waitForLine } from "../utils/waitForLine.js";
+import { extractAllLinks } from "./linkExtractor.js";
 
 export class MirrorCrawler {
   private readonly db: CrawlDatabase;
@@ -115,7 +116,8 @@ export class MirrorCrawler {
         await page.screenshot({ path: shotPath, fullPage: true });
       }
 
-      const links = await page.$$eval("a[href]", (anchors) => anchors.map((a) => (a as HTMLAnchorElement).href));
+      // Extract all links, including those without href attributes (client-side routing)
+      const links = await extractAllLinks(page);
       for (const href of links) {
         const next = normalizeUrl(href, current);
         if (!isSameOrigin(next, this.config.baseUrl)) continue;
