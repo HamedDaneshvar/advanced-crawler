@@ -1,191 +1,490 @@
 import type { Page } from "playwright";
 
+type ExtractOptions = {
+  baseUrl?: string;
+  autoClick?: boolean;
+  clickLimit?: number;
+  waitAfterClickMs?: number;
+};
+
 /**
- * Extracts all navigable links from a page, including:
- * - Standard <a href="..."> links (including those added by JavaScript)
- * - Links from data-href attributes
- * - Links from onclick handlers
- * 
- * This handles client-side routing where <a> elements don't have href
- * in the source HTML but get decorated with href or other navigation
- * data by JavaScript at runtime.
+ * Production-grade link extractor for:
+ * - Next.js
+ * - React SPA
+ * - Vue
+ * - Client-side routers
+ * - Hydrated hrefs
+ * - Hidden routes
+ * - router.push()
+ * - history.pushState()
+ * - Prefetched routes
+ *
+ * Features:
+ * - Runtime href extraction
+ * - __NEXT_DATA__ parsing
+ * - Network interception
+ * - Navigation API interception
+ * - Auto-click discovery
+ * - Dynamic route extraction
  */
-export async function extractAllLinks(page: Page, baseUrl?: string): Promise<string[]> {
-  const links = await page.evaluate((providedBase?: string) => {
-    const linkSet = new Set<string>();
+export async function extractAllLinks(
+  page: Page,
+  options: ExtractOptions = {}
+): Promise<string[]> {
+  const {
+    baseUrl,
+    autoClick = true,
+    clickLimit = 200,
+    waitAfterClickMs = 300,
+  } = options;
 
-    // Determine base for resolving relative URLs
-    const base = providedBase && providedBase !== '' ? providedBase : (document.baseURI || window.location.href);
+  const finalLinks = new Set<string>();
 
-    // Get all anchor elements in the page
-    const anchors = document.querySelectorAll("a");
+  // =========================================================
+  // BASE URL
+  // =========================================================
 
-    for (const anchor of anchors) {
-      // Try href attribute
-      const href = anchor.getAttribute("href");
-      if (href && href.trim() && !href.startsWith("javascript:") && !href.startsWith("#")) {
-        try {
-          const url = new URL(href, base);
-          linkSet.add(url.href);
-        } catch {
-          // Invalid URL, skip
-        }
+  const resolvedBase =
+    baseUrl ||
+    page.url() ||
+    "http://localhost";
+
+  // =========================================================
+  // NETWORK INTERCEPTION
+  // =========================================================
+
+  const networkLinks = new Set<string>();
+
+  page.on("response", async (response) => {
+    try {
+      const url = response.url();
+
+      // Store response URL itself
+      addUrl(url);
+
+      const contentType =
+        response.headers()["content-type"] || "";
+
+      // Only inspect text/json
+      if (
+        !contentType.includes("json") &&
+        !contentType.includes("javascript") &&
+        !contentType.includes("text")
+      ) {
+        return;
       }
 
-      // Try data-href attribute (common in some frameworks)
-      const dataHref = anchor.getAttribute("data-href");
-      if (dataHref && dataHref.trim()) {
-        try {
-          const url = new URL(dataHref, base);
-          linkSet.add(url.href);
-        } catch {
-          // Invalid URL, skip
-        }
-      }
+      const text = await response.text();
 
-      // Try aria-href attribute (accessibility extension)
-      const ariaHref = anchor.getAttribute("aria-href");
-      if (ariaHref && ariaHref.trim()) {
-        try {
-          const url = new URL(ariaHref, base);
-          linkSet.add(url.href);
-        } catch {
-          // Invalid URL, skip
-        }
-      }
-
-      // Try onclick handler - extract URLs from common patterns
-      const onclick = anchor.getAttribute("onclick");
-      if (onclick) {
-        // Match common patterns like: window.location='...', navigate('...')
-        const patterns = [
-          /window\.location\s*=\s*['"](.*?)['"]/,
-          /window\.location\.href\s*=\s*['"](.*?)['"]/,
-          /navigate\(['"](.*?)['"]\)/,
-          /router\.push\(['"](.*?)['"]\)/,
-          /location\.href\s*=\s*['"](.*?)['"]/
-        ];
-
-        for (const pattern of patterns) {
-          const match = onclick.match(pattern);
-          if (match?.[1]) {
-            try {
-              const url = new URL(match[1], base);
-              linkSet.add(url.href);
-            } catch {
-              // Invalid URL, skip
-            }
-          }
-        }
-      }
-
-      // Check if element has role="link" or similar and analyze its structure
-      const role = anchor.getAttribute("role");
-      if (role === "link" || role === "button") {
-        // Look for data attributes that might contain navigation info
-        for (const attr of anchor.attributes) {
-          if (attr.name.startsWith("data-") && (attr.name.includes("href") || attr.name.includes("url") || attr.name.includes("link"))) {
-            if (attr.value && attr.value.trim()) {
-              try {
-                const url = new URL(attr.value, base);
-                linkSet.add(url.href);
-              } catch {
-                // Invalid URL, skip
-              }
-            }
-          }
-        }
-      }
-
-      // Check for Next.js Link component - look for href in parent <a> wrapping element
-      const nextLink = anchor.closest("a");
-      if (nextLink && nextLink !== anchor) {
-        const nextHref = nextLink.getAttribute("href");
-        if (nextHref && nextHref.trim() && !nextHref.startsWith("javascript:") && !nextHref.startsWith("#")) {
-          try {
-            const url = new URL(nextHref, base);
-            linkSet.add(url.href);
-          } catch {
-            // Invalid URL, skip
-          }
-        }
-      }
+      extractUrlsFromText(text);
+    } catch {
+      //
     }
+  });
 
-    return Array.from(linkSet);
-  }, baseUrl);
+  // =========================================================
+  // INJECT NAVIGATION HOOKS BEFORE PAGE LOAD
+  // =========================================================
 
-  // If we already found links, attempt to detect JS-driven navigation too
-  if (links.length === 0) {
-    // Attempt to click potential clickable elements and capture navigation targets
-    const captured = await page.evaluate((providedBase?: string) => {
-      // Prepare capture storage
-      // @ts-ignore
-      window.__crawlerCapturedNavigations = window.__crawlerCapturedNavigations || [];
+  await page.addInitScript(() => {
+    // @ts-ignore
+    window.__CRAWLER_CAPTURED_URLS__ = [];
 
-      // Patch navigation APIs to capture targets instead of navigating
-      const originalAssign = window.location.assign;
-      const originalReplace = window.location.replace;
-      const originalOpen = window.open;
-      const originalPush = history.pushState;
-
+    const capture = (url: any) => {
       try {
-        // @ts-ignore
-        window.location.assign = function (url: string) {
-          // @ts-ignore
-          window.__crawlerCapturedNavigations.push(String(url));
-        } as any;
-        // @ts-ignore
-        window.location.replace = function (url: string) {
-          // @ts-ignore
-          window.__crawlerCapturedNavigations.push(String(url));
-        } as any;
-        // @ts-ignore
-        window.open = function (url: string) {
-          // @ts-ignore
-          window.__crawlerCapturedNavigations.push(String(url));
-          return null as any;
-        } as any;
-        // @ts-ignore
-        history.pushState = function (state: any, title: string, url?: string | null) {
-          if (url) {
-            // @ts-ignore
-            window.__crawlerCapturedNavigations.push(String(url));
-          }
-          return originalPush.apply(history, [state, title, url]);
-        } as any;
+        if (!url) return;
 
-        // Find candidate clickable elements: anchors without href, elements with onclick, or pointer cursor
-        const candidates: Element[] = Array.from(document.querySelectorAll('a:not([href]), [onclick], [role="link"], [role="button"]'));
+        // @ts-ignore
+        window.__CRAWLER_CAPTURED_URLS__.push(String(url));
+      } catch {
+        //
+      }
+    };
 
-        for (const el of candidates) {
-          try {
-            // Try a synthetic click
-            (el as HTMLElement).click?.();
-          } catch {
-            // ignore
-          }
+    // =========================================
+    // history.pushState
+    // =========================================
+
+    const originalPushState = history.pushState;
+
+    history.pushState = function (
+      state: any,
+      title: string,
+      url?: string | URL | null
+    ) {
+      if (url) capture(url);
+
+      return originalPushState.apply(this, [
+        state,
+        title,
+        url,
+      ]);
+    };
+
+    // =========================================
+    // history.replaceState
+    // =========================================
+
+    const originalReplaceState = history.replaceState;
+
+    history.replaceState = function (
+      state: any,
+      title: string,
+      url?: string | URL | null
+    ) {
+      if (url) capture(url);
+
+      return originalReplaceState.apply(this, [
+        state,
+        title,
+        url,
+      ]);
+    };
+
+    // =========================================
+    // window.open
+    // =========================================
+
+    const originalOpen = window.open;
+
+    window.open = function (
+      url?: string | URL,
+      target?: string,
+      features?: string
+    ) {
+      if (url) capture(url);
+
+      return originalOpen.call(
+        window,
+        url,
+        target,
+        features
+      );
+    };
+
+    // =========================================
+    // location.assign
+    // =========================================
+
+    const originalAssign = window.location.assign;
+
+    window.location.assign = function (
+      url: string | URL
+    ) {
+      capture(url);
+
+      return originalAssign.call(window.location, url);
+    };
+
+    // =========================================
+    // location.replace
+    // =========================================
+
+    const originalReplace = window.location.replace;
+
+    window.location.replace = function (
+      url: string | URL
+    ) {
+      capture(url);
+
+      return originalReplace.call(window.location, url);
+    };
+  });
+
+  // =========================================================
+  // WAIT FOR HYDRATION
+  // =========================================================
+
+  try {
+    await page.waitForLoadState("networkidle", {
+      timeout: 15000,
+    });
+  } catch {
+    //
+  }
+
+  // =========================================================
+  // EXTRACT FROM DOM + NEXT DATA
+  // =========================================================
+
+  const extracted = await page.evaluate(
+    ({ base }) => {
+      const found = new Set<string>();
+
+      const normalize = (url: string) => {
+        try {
+          return new URL(url, base).href;
+        } catch {
+          return null;
+        }
+      };
+
+      const add = (url?: string | null) => {
+        if (!url) return;
+
+        if (
+          url.startsWith("javascript:") ||
+          url.startsWith("#") ||
+          url.startsWith("mailto:") ||
+          url.startsWith("tel:")
+        ) {
+          return;
         }
 
-        // Return captured navigations (unique)
-        // @ts-ignore
-        return Array.from(new Set(window.__crawlerCapturedNavigations.map((u: any) => {
-          try { return new URL(u, providedBase || window.location.href).href; } catch { return null; }
-        }).filter(Boolean)) as string[]);
-      } finally {
-        // Restore originals
-        try { window.location.assign = originalAssign; } catch {};
-        try { window.location.replace = originalReplace; } catch {};
-        try { window.open = originalOpen; } catch {};
-        try { history.pushState = originalPush; } catch {};
-      }
-    }, baseUrl);
+        const normalized = normalize(url);
 
-    // Merge captured targets into links
-    for (const c of captured) {
-      if (c && !links.includes(c)) links.push(c);
+        if (normalized) {
+          found.add(normalized);
+        }
+      };
+
+      // =====================================================
+      // A TAGS (IMPORTANT: USE .href NOT getAttribute)
+      // =====================================================
+
+      const anchors = document.querySelectorAll("a");
+
+      for (const anchor of anchors) {
+        const href = (anchor as HTMLAnchorElement).href;
+
+        add(href);
+
+        // Extra attributes
+        for (const attr of anchor.attributes) {
+          if (
+            attr.name.includes("href") ||
+            attr.name.includes("url") ||
+            attr.name.includes("link")
+          ) {
+            add(attr.value);
+          }
+        }
+      }
+
+      // =====================================================
+      // ALL CLICKABLE ELEMENTS
+      // =====================================================
+
+      const clickable = document.querySelectorAll(`
+        [onclick],
+        [role="link"],
+        [role="button"],
+        button,
+        div,
+        span
+      `);
+
+      for (const el of clickable) {
+        for (const attr of el.attributes) {
+          const name = attr.name.toLowerCase();
+
+          if (
+            name.includes("href") ||
+            name.includes("url") ||
+            name.includes("link") ||
+            name.includes("route") ||
+            name.includes("path")
+          ) {
+            add(attr.value);
+          }
+        }
+      }
+
+      // =====================================================
+      // PARSE __NEXT_DATA__
+      // =====================================================
+
+      const nextData =
+        document.querySelector("#__NEXT_DATA__");
+
+      if (nextData?.textContent) {
+        try {
+          const data = JSON.parse(
+            nextData.textContent
+          );
+
+          const walk = (obj: any) => {
+            if (!obj) return;
+
+            if (typeof obj === "string") {
+              if (
+                obj.startsWith("/") ||
+                obj.startsWith("http")
+              ) {
+                add(obj);
+              }
+
+              return;
+            }
+
+            if (Array.isArray(obj)) {
+              obj.forEach(walk);
+              return;
+            }
+
+            if (typeof obj === "object") {
+              Object.values(obj).forEach(walk);
+            }
+          };
+
+          walk(data);
+        } catch {
+          //
+        }
+      }
+
+      // =====================================================
+      // SEARCH WHOLE HTML FOR URL PATTERNS
+      // =====================================================
+
+      const html = document.documentElement.outerHTML;
+
+      const regexes = [
+        /https?:\/\/[^\s"'<>]+/g,
+        /"\/[^"]+"/g,
+        /'\/[^']+'/g,
+      ];
+
+      for (const regex of regexes) {
+        const matches = html.match(regex);
+
+        if (!matches) continue;
+
+        for (const match of matches) {
+          const cleaned = match.replace(/^['"]|['"]$/g, "");
+
+          add(cleaned);
+        }
+      }
+
+      return Array.from(found);
+    },
+    {
+      base: resolvedBase,
+    }
+  );
+
+  extracted.forEach((x) => finalLinks.add(x));
+
+  // =========================================================
+  // AUTO CLICK DISCOVERY
+  // =========================================================
+
+  if (autoClick) {
+    const candidates = await page.locator(`
+      a,
+      button,
+      [role="button"],
+      [role="link"],
+      [onclick]
+    `).all();
+
+    const limited = candidates.slice(0, clickLimit);
+
+    for (const el of limited) {
+      try {
+        await el.scrollIntoViewIfNeeded();
+
+        // Trial click first
+        await el.click({
+          trial: true,
+          timeout: 1000,
+        });
+
+        // Real click
+        await el.click({
+          timeout: 1000,
+          force: true,
+        });
+
+        await page.waitForTimeout(
+          waitAfterClickMs
+        );
+      } catch {
+        //
+      }
     }
   }
 
-  return links;
+  // =========================================================
+  // READ CAPTURED CLIENT NAVIGATION
+  // =========================================================
+
+  const capturedUrls = await page.evaluate(() => {
+    // @ts-ignore
+    return window.__CRAWLER_CAPTURED_URLS__ || [];
+  });
+
+  for (const url of capturedUrls) {
+    addUrl(url);
+  }
+
+  // =========================================================
+  // MERGE NETWORK LINKS
+  // =========================================================
+
+  networkLinks.forEach((x) => {
+    finalLinks.add(x);
+  });
+
+  // =========================================================
+  // HELPERS
+  // =========================================================
+
+  function addUrl(url?: string | null) {
+    if (!url) return;
+
+    try {
+      const normalized = new URL(
+        url,
+        resolvedBase
+      ).href;
+
+      finalLinks.add(normalized);
+      networkLinks.add(normalized);
+    } catch {
+      //
+    }
+  }
+
+  function extractUrlsFromText(text: string) {
+    const regexes = [
+      /https?:\/\/[^\s"'<>]+/g,
+      /\/[a-zA-Z0-9_\-/]+/g,
+    ];
+
+    for (const regex of regexes) {
+      const matches = text.match(regex);
+
+      if (!matches) continue;
+
+      for (const match of matches) {
+        addUrl(match);
+      }
+    }
+  }
+
+  // =========================================================
+  // FILTER JUNK
+  // =========================================================
+
+  const cleaned = Array.from(finalLinks).filter(
+    (url) => {
+      return !(
+        url.includes(".png") ||
+        url.includes(".jpg") ||
+        url.includes(".jpeg") ||
+        url.includes(".gif") ||
+        url.includes(".svg") ||
+        url.includes(".webp") ||
+        url.includes(".css") ||
+        url.includes(".woff") ||
+        url.includes(".woff2") ||
+        url.includes(".ttf") ||
+        url.includes(".ico")
+      );
+    }
+  );
+
+  return cleaned.sort();
 }

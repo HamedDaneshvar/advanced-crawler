@@ -1,43 +1,311 @@
-import { chromium } from 'playwright';
-import { extractAllLinks } from '../src/core/linkExtractor.js';
+import { chromium } from "playwright";
+
+import { extractAllLinks } from "../src/core/linkExtractor.js";
 
 const SAMPLE_HTML = `
-<base href="https://bytebytego.com/">
-<div class="style-module-scss-module__lSxgaq__courseList">
-  <a class="style-module-scss-module__lSxgaq__courseImg" onclick="window.location='/courses/coding-patterns'"><img alt="Coding Interview Patterns"></a>
-  <a class="style-module-scss-module__lSxgaq__courseImg" data-href="/courses/system-design-interview"><img alt="System Design"></a>
-  <a class="style-module-scss-module__lSxgaq__courseImg"><img alt="No Link"></a>
-</div>
+<!DOCTYPE html>
+<html>
+<head>
+  <base href="https://bytebytego.com/" />
+</head>
+
+<body>
+  <div class="style-module-scss-module__lSxgaq__courseList">
+
+    <!-- onclick navigation -->
+    <a
+      class="style-module-scss-module__lSxgaq__courseImg"
+      onclick="window.location='/courses/coding-patterns'"
+    >
+      <img alt="Coding Interview Patterns" />
+    </a>
+
+    <!-- data-href navigation -->
+    <a
+      class="style-module-scss-module__lSxgaq__courseImg"
+      data-href="/courses/system-design-interview"
+    >
+      <img alt="System Design" />
+    </a>
+
+    <!-- normal href -->
+    <a
+      class="style-module-scss-module__lSxgaq__courseImg"
+      href="/courses/tech-resume"
+    >
+      <img alt="Tech Resume" />
+    </a>
+
+    <!-- react-style route -->
+    <div
+      role="link"
+      data-url="/courses/react-performance"
+    >
+      React Performance
+    </div>
+
+    <!-- next.js simulated -->
+    <script id="__NEXT_DATA__" type="application/json">
+      {
+        "props": {
+          "pageProps": {
+            "courses": [
+              {
+                "slug": "/courses/system-design"
+              },
+              {
+                "slug": "/courses/microservices"
+              }
+            ]
+          }
+        }
+      }
+    </script>
+
+  </div>
+</body>
+</html>
 `;
 
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({
+    headless: true,
+  });
+
   const context = await browser.newContext();
+
   const page = await context.newPage();
-  await page.setContent(SAMPLE_HTML, { waitUntil: 'domcontentloaded' });
-  console.log('page.url:', await page.url());
-  const debug = await page.$$eval('a', (anchors) => anchors.map((a) => ({ href: a.getAttribute('href'), onclick: a.getAttribute('onclick'), dataHref: a.getAttribute('data-href') })));
-  console.log('Anchor debug:', debug);
+
+  // =======================================================
+  // LOAD TEST HTML
+  // =======================================================
+
+  await page.setContent(SAMPLE_HTML, {
+    waitUntil: "domcontentloaded",
+  });
+
+  console.log(
+    "\n================================================="
+  );
+
+  console.log("PAGE URL");
+
+  console.log(
+    "=================================================\n"
+  );
+
+  console.log(page.url());
+
+  // =======================================================
+  // DEBUG RAW ELEMENTS
+  // =======================================================
+
+  const debug = await page.$$eval(
+    "a",
+    (anchors) => {
+      return anchors.map((a) => ({
+        runtimeHref:
+          (a as HTMLAnchorElement).href,
+
+        attributeHref:
+          a.getAttribute("href"),
+
+        onclick:
+          a.getAttribute("onclick"),
+
+        dataHref:
+          a.getAttribute("data-href"),
+      }));
+    }
+  );
+
+  console.log(
+    "\n================================================="
+  );
+
+  console.log("ANCHOR DEBUG");
+
+  console.log(
+    "=================================================\n"
+  );
+
+  console.dir(debug, {
+    depth: null,
+  });
+
+  // =======================================================
+  // MANUAL EVALUATION TEST
+  // =======================================================
+
   const evalLinks = await page.evaluate(() => {
-    const linkSet = new Set();
-    const anchors = document.querySelectorAll('a');
-    for (const anchor of anchors) {
-      const href = anchor.getAttribute('href');
-      if (href && href.trim() && !href.startsWith('javascript:') && !href.startsWith('#')) {
-        try { linkSet.add(new URL(href, window.location.href).href); } catch {}
+    const found = new Set<string>();
+
+    const add = (url?: string | null) => {
+      if (!url) return;
+
+      try {
+        found.add(
+          new URL(
+            url,
+            window.location.href
+          ).href
+        );
+      } catch {
+        //
       }
-      const dataHref = anchor.getAttribute('data-href');
-      if (dataHref && dataHref.trim()) { try { linkSet.add(new URL(dataHref, window.location.href).href); } catch {} }
-      const onclick = anchor.getAttribute('onclick');
+    };
+
+    // ===============================================
+    // NORMAL A TAGS
+    // ===============================================
+
+    const anchors =
+      document.querySelectorAll("a");
+
+    for (const anchor of anchors) {
+      // IMPORTANT:
+      // runtime .href NOT getAttribute("href")
+
+      const href = (
+        anchor as HTMLAnchorElement
+      ).href;
+
+      add(href);
+
+      const dataHref =
+        anchor.getAttribute(
+          "data-href"
+        );
+
+      add(dataHref);
+
+      const onclick =
+        anchor.getAttribute(
+          "onclick"
+        );
+
       if (onclick) {
-        const patterns = [/window\.location\s*=\s*['\"](.*?)['\"]/,/window\.location\.href\s*=\s*['\"](.*?)['\"]/,/navigate\(['\"](.*?)['\"]\)/,/router\.push\(['\"](.*?)['\"]\)/,/location\.href\s*=\s*['\"](.*?)['\"]/];
-        for (const pattern of patterns) { const match = onclick.match(pattern); if (match?.[1]) { try { linkSet.add(new URL(match[1], window.location.href).href); } catch {} } }
+        const patterns = [
+          /window\.location\s*=\s*['"](.*?)['"]/,
+          /window\.location\.href\s*=\s*['"](.*?)['"]/,
+          /navigate\(['"](.*?)['"]\)/,
+          /router\.push\(['"](.*?)['"]\)/,
+          /location\.href\s*=\s*['"](.*?)['"]/,
+        ];
+
+        for (const pattern of patterns) {
+          const match =
+            onclick.match(pattern);
+
+          if (match?.[1]) {
+            add(match[1]);
+          }
+        }
       }
     }
-    return Array.from(linkSet);
+
+    // ===============================================
+    // NEXT DATA
+    // ===============================================
+
+    const nextData =
+      document.querySelector(
+        "#__NEXT_DATA__"
+      );
+
+    if (nextData?.textContent) {
+      try {
+        const data = JSON.parse(
+          nextData.textContent
+        );
+
+        const walk = (obj: any) => {
+          if (!obj) return;
+
+          if (
+            typeof obj === "string"
+          ) {
+            if (
+              obj.startsWith("/") ||
+              obj.startsWith("http")
+            ) {
+              add(obj);
+            }
+
+            return;
+          }
+
+          if (Array.isArray(obj)) {
+            obj.forEach(walk);
+
+            return;
+          }
+
+          if (
+            typeof obj === "object"
+          ) {
+            Object.values(obj).forEach(
+              walk
+            );
+          }
+        };
+
+        walk(data);
+      } catch {
+        //
+      }
+    }
+
+    return Array.from(found);
   });
-  console.log('EvalLinks:', evalLinks);
-  const links = await extractAllLinks(page, 'https://bytebytego.com');
-  console.log('Found links:', links);
+
+  console.log(
+    "\n================================================="
+  );
+
+  console.log("MANUAL EVALUATION LINKS");
+
+  console.log(
+    "=================================================\n"
+  );
+
+  console.dir(evalLinks, {
+    depth: null,
+  });
+
+  // =======================================================
+  // TEST NEW extractAllLinks API
+  // =======================================================
+
+  const links =
+    await extractAllLinks(page, {
+      baseUrl:
+        "https://bytebytego.com",
+
+      autoClick: true,
+
+      clickLimit: 20,
+
+      waitAfterClickMs: 100,
+    });
+
+  console.log(
+    "\n================================================="
+  );
+
+  console.log("extractAllLinks RESULT");
+
+  console.log(
+    "=================================================\n"
+  );
+
+  console.dir(links, {
+    depth: null,
+  });
+
+  // =======================================================
+  // CLEANUP
+  // =======================================================
+
   await browser.close();
 })();

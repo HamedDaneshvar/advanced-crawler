@@ -1,8 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
+import type { Archiver } from "archiver";
 
-const require = createRequire(import.meta.url);
+// Cache the archiver module to avoid repeated dynamic imports
+let archiverModule: any = null;
+
+async function getArchiver() {
+  if (!archiverModule) {
+    archiverModule = await import("archiver");
+  }
+  return archiverModule.default;
+}
 
 /**
  * Creates a zip file from a directory
@@ -11,27 +19,20 @@ const require = createRequire(import.meta.url);
  * @returns Promise that resolves to the absolute path of the created zip
  */
 export async function zipDirectory(sourceDir: string, outputPath: string): Promise<string> {
+  // Ensure output directory exists
+  const outputDir = path.dirname(outputPath);
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  const output = fs.createWriteStream(outputPath);
+  
+  const archiver = await getArchiver();
+  const archive: Archiver = archiver("zip", {
+    zlib: { level: 9 } // Maximum compression
+  });
+
   return new Promise((resolve, reject) => {
-    // Ensure output directory exists
-    const outputDir = path.dirname(outputPath);
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
-
-    const output = fs.createWriteStream(outputPath);
-    
-    let archive: any;
-    try {
-      // Use require to import archiver (CommonJS)
-      const Archiver = require("archiver");
-      archive = Archiver("zip", {
-        zlib: { level: 9 } // Maximum compression
-      });
-    } catch (err) {
-      reject(new Error(`Failed to initialize archiver: ${String(err)}`));
-      return;
-    }
-
     output.on("close", () => {
       resolve(path.resolve(outputPath));
     });
@@ -64,27 +65,20 @@ export async function zipMultipleDirectories(
   directories: Array<{ path: string; name: string }>,
   outputPath: string
 ): Promise<string> {
+  // Ensure output directory exists
+  const outputDir = path.dirname(outputPath);
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  const output = fs.createWriteStream(outputPath);
+  
+  const archiver = await getArchiver();
+  const archive: Archiver = archiver("zip", {
+    zlib: { level: 9 } // Maximum compression
+  });
+
   return new Promise((resolve, reject) => {
-    // Ensure output directory exists
-    const outputDir = path.dirname(outputPath);
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
-
-    const output = fs.createWriteStream(outputPath);
-    
-    let archive: any;
-    try {
-      // Use require to import archiver (CommonJS)
-      const Archiver = require("archiver");
-      archive = Archiver("zip", {
-        zlib: { level: 9 } // Maximum compression
-      });
-    } catch (err) {
-      reject(new Error(`Failed to initialize archiver: ${String(err)}`));
-      return;
-    }
-
     output.on("close", () => {
       resolve(path.resolve(outputPath));
     });
