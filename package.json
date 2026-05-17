@@ -10,6 +10,7 @@
     "resume": "tsx src/cli.ts resume",
     "login": "tsx src/cli.ts login",
     "clean": "tsx src/cli.ts clean",
+    "clear-all": "tsx src/cli.ts clear-all",
     "test:watch": "vitest",
     "postinstall": "playwright install --with-deps chromium"
   },
@@ -19,6 +20,7 @@
   "type": "module",
   "private": true,
   "dependencies": {
+    "archiver": "^8.0.0",
     "better-sqlite3": "^12.10.0",
     "cheerio": "^1.2.0",
     "dotenv": "^17.4.2",
@@ -30,6 +32,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/archiver": "^7.0.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/fs-extra": "^11.0.4",
     "@types/mime-types": "^3.0.1",

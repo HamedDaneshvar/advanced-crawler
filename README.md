@@ -5,9 +5,10 @@ Enterprise-grade authenticated browser mirroring with Node.js + TypeScript + Pla
 ## Commands
 
 - `npm run login` manual login and auth-state capture.
-- `npm run crawl` start fresh crawl from seed URL.
-- `npm run resume` continue interrupted crawl from SQLite queue.
-- `npm run clean` remove generated artifacts.
+- `npm run crawl` start fresh crawl from seed URL. Creates a zip archive of output and assets when complete.
+- `npm run resume` continue interrupted crawl from SQLite queue. Creates a zip archive of output and assets when complete.
+- `npm run clean` remove generated artifacts (output, assets, logs, cache, screenshots).
+- `npm run clear-all` remove all crawl data including output, assets, database, auth, logs, cache, and screenshots.
 - `npm test` run tests.
 
 ## Runtime folders
