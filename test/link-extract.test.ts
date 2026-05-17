@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import { extractAllLinks } from '../src/core/linkExtractor.js';
 
 const SAMPLE_HTML = `
+<base href="https://bytebytego.com/">
 <div class="style-module-scss-module__lSxgaq__courseList">
   <a class="style-module-scss-module__lSxgaq__courseImg" onclick="window.location='/courses/coding-patterns'"><img alt="Coding Interview Patterns"></a>
   <a class="style-module-scss-module__lSxgaq__courseImg" data-href="/courses/system-design-interview"><img alt="System Design"></a>
@@ -13,7 +14,7 @@ const SAMPLE_HTML = `
   const browser = await chromium.launch();
   const context = await browser.newContext();
   const page = await context.newPage();
-  await page.setContent(SAMPLE_HTML, { waitUntil: 'domcontentloaded', url: 'https://bytebytego.com' });
+  await page.setContent(SAMPLE_HTML, { waitUntil: 'domcontentloaded' });
   console.log('page.url:', await page.url());
   const debug = await page.$$eval('a', (anchors) => anchors.map((a) => ({ href: a.getAttribute('href'), onclick: a.getAttribute('onclick'), dataHref: a.getAttribute('data-href') })));
   console.log('Anchor debug:', debug);

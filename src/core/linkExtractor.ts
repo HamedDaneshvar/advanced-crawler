@@ -131,22 +131,23 @@ export async function extractAllLinks(page: Page, baseUrl?: string): Promise<str
 
       try {
         // @ts-ignore
-        window.location.assign = function (url: string) { // @ts-expect-error
+        window.location.assign = function (url: string) {
           // @ts-ignore
           window.__crawlerCapturedNavigations.push(String(url));
         } as any;
         // @ts-ignore
-        window.location.replace = function (url: string) { // @ts-expect-error
+        window.location.replace = function (url: string) {
           // @ts-ignore
           window.__crawlerCapturedNavigations.push(String(url));
         } as any;
         // @ts-ignore
-        window.open = function (url: string) { // @ts-expect-error
+        window.open = function (url: string) {
           // @ts-ignore
           window.__crawlerCapturedNavigations.push(String(url));
           return null as any;
         } as any;
-        history.pushState = function (state: any, title: string, url?: string | null) { // @ts-expect-error
+        // @ts-ignore
+        history.pushState = function (state: any, title: string, url?: string | null) {
           if (url) {
             // @ts-ignore
             window.__crawlerCapturedNavigations.push(String(url));
